@@ -32,7 +32,6 @@
 	const entry = $derived(snapshot?.entries.find((e) => e.run === run && e.peptide === peptide) ?? null);
 	const cards = $derived(entry ? buildCards(entry) : []);
 	const groups = $derived(groupBySoc(cards));
-	const maxFreq = $derived(Math.max(0, ...cards.map((c) => c.prediction.frequency_pct ?? 0)));
 	const selected = $derived(cards.find((c) => c.prediction.id === selectedId) ?? null);
 	const counts = $derived({
 		strong: cards.filter((c) => c.strength === 'strong').length,
@@ -122,7 +121,6 @@
 							{#each g.cards as c (c.prediction.id)}
 								<AeCard
 									card={c}
-									{maxFreq}
 									selected={c.prediction.id === selectedId}
 									onselect={() =>
 										(selectedId = selectedId === c.prediction.id ? null : c.prediction.id)}

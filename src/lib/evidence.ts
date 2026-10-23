@@ -92,3 +92,9 @@ export function runLabel(run: string): string {
 export function pubmedUrl(pmid: string): string {
 	return `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`;
 }
+
+/** Bar width for a frequency on a square-root scale of 0–100%, so 1% / 10% / 50% sit at 10 / 32 / 71% and rare events stay visible. */
+export function freqBarWidth(pct: number | null | undefined): number {
+	if (pct == null || pct <= 0) return 0;
+	return Math.min(100, Math.max(2, Math.sqrt(pct) * 10));
+}

@@ -1,23 +1,22 @@
 <script lang="ts">
 	import type { AeCardData } from '../types';
-	import { SEVERITY_LABEL } from '../evidence';
+	import { SEVERITY_LABEL, freqBarWidth } from '../evidence';
 	import Badge from './Badge.svelte';
 	import { severityTone, strengthTone } from './tones';
 
 	interface Props {
 		card: AeCardData;
 		selected: boolean;
-		maxFreq: number;
 		onselect: () => void;
 	}
-	let { card, selected, maxFreq, onselect }: Props = $props();
+	let { card, selected, onselect }: Props = $props();
 
 	const p = $derived(card.prediction);
 	const proteins = $derived([...new Set(card.evidence.flatMap((r) => r.proteins))]);
 	const snippet = $derived(
 		(card.primary?.evidence ?? card.primary?.mechanistic_chain ?? '').replace(/^(?:Chain|Mechanistic chain)\s*:\s*/i, '') || null
 	);
-	const width = $derived(p.frequency_pct != null && maxFreq > 0 ? Math.max(3, (p.frequency_pct / maxFreq) * 100) : 0);
+	const width = $derived(freqBarWidth(p.frequency_pct));
 </script>
 
 <button
@@ -35,7 +34,7 @@
 
 	<div class="freq" aria-label="Predicted frequency {p.frequency_text ?? 'unknown'}">
 		<span class="freq-value">{p.frequency_text ?? '–'}</span>
-		<span class="bar"><span style="width: {width}%"></span></span>
+		<span class="bar" title="Square-root scale of 0–100%: ticks at 1%, 10% and 50%"><span style="width: {width}%"></span></span>
 	</div>
 
 	<div class="meta">
@@ -114,14 +113,21 @@
 		flex: 1;
 		height: 6px;
 		border-radius: 3px;
-		background: var(--line);
+		background:
+			linear-gradient(90deg, transparent calc(10% - 1px), var(--faint) 0 10%, transparent 0) no-repeat,
+			linear-gradient(90deg, transparent calc(31.6% - 1px), var(--faint) 0 31.6%, transparent 0) no-repeat,
+			linear-gradient(90deg, transparent calc(70.7% - 1px), var(--faint) 0 70.7%, transparent 0) no-repeat,
+			var(--line);
 		overflow: hidden;
+		position: relative;
 	}
 	.bar span {
 		display: block;
 		height: 100%;
 		background: var(--green);
 		border-radius: 3px;
+		position: relative;
+		z-index: 1;
 	}
 	.meta {
 		display: flex;
