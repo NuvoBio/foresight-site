@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Logo from '#lib/components/Logo.svelte';
 	import { onMount } from 'svelte';
 	import { asset } from '$app/paths';
 	import type { Snapshot } from '../lib/types';
@@ -63,7 +64,7 @@
 <header class="topbar">
 	<div class="wrap bar">
 		<div class="brand">
-			<span class="logo" aria-hidden="true"></span>
+			<span class="logo"><Logo size={52} /></span>
 			<div>
 				<h1>Foresight</h1>
 				<p>Predicted adverse events and the reasoning behind them</p>
@@ -174,18 +175,8 @@
 		gap: 12px;
 	}
 	.logo {
-		width: 30px;
-		height: 30px;
-		border-radius: 50%;
-		border: 3px solid var(--green);
-		position: relative;
-	}
-	.logo::after {
-		content: '';
-		position: absolute;
-		inset: 7px;
-		border-radius: 50%;
-		background: var(--orange);
+		display: grid;
+		place-items: center;
 	}
 	h1 {
 		margin: 0;
