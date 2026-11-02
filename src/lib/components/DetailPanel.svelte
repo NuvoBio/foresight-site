@@ -1,8 +1,18 @@
 <script lang="ts">
 	import type { AeCardData, Chunk, Entry } from '../types';
-	import { MATCH_LABEL, SEVERITY_LABEL, chainSteps, pubmedUrl } from '../evidence';
+	import {
+		CONFIDENCE_LABEL,
+		LOCATION_LABEL,
+		MATCH_LABEL,
+		PLAUSIBILITY_LABEL,
+		SEVERITY_LABEL,
+		chainSteps,
+		plausibilityReason,
+		pubmedUrl
+	} from '../evidence';
+	import { proteinsOf } from '../summary';
 	import Badge from './Badge.svelte';
-	import { severityTone, strengthTone } from './tones';
+	import { confidenceTone, plausibilityTone, severityTone, strengthTone } from './tones';
 
 	interface Props {
 		card: AeCardData;
@@ -27,6 +37,8 @@
 	const sections = $derived(
 		record ? entry.protein_sections.filter((s) => record.proteins.includes(s.protein)) : []
 	);
+	const proteinInfo = $derived(new Map(proteinsOf(entry).map((pi) => [pi.gene, pi])));
+	const rationale = $derived(p.confidence_rationale ?? record?.confidence_rationale ?? null);
 	const fileName = $derived(`${entry.peptide}_reasoning.txt`);
 	const BORROW_LABEL: Record<string, string> = {
 		proteins: 'Proteins',
@@ -34,7 +46,10 @@
 		evidence: 'Evidence',
 		relationship_type: 'Relationship type',
 		direction: 'Direction',
-		strength: 'Strength'
+		strength: 'Strength',
+		plausibility: 'Plausibility',
+		confidence: 'Confidence',
+		confidence_rationale: 'Confidence rationale'
 	};
 </script>
 
@@ -60,6 +75,12 @@
 			<span class="label">Evidence</span>
 			<Badge tone={strengthTone(card.strength)}>{card.strength ?? 'not stated'}</Badge>
 		</div>
+		<div>
+			<span class="label">Confidence</span>
+			<Badge tone={confidenceTone(card.confidence)}>
+				{card.confidence ? CONFIDENCE_LABEL[card.confidence] : 'not rated'}
+			</Badge>
+		</div>
 		{#if p.score_status}
 			<div>
 				<span class="label">Benchmark</span>
@@ -69,6 +90,10 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if rationale}
+		<p class="rationale"><span class="label">Least certain part</span>{rationale}</p>
+	{/if}
 
 	{#if !record}
 		<p class="empty">The parser found no reasoning for this AE in {fileName}.</p>
@@ -85,8 +110,17 @@
 
 		<section>
 			<h4>Proteins</h4>
-			<ul class="chips">
-				{#each record.proteins as pr (pr)}<li class="mono">{pr}</li>{/each}
+			<ul class="chips proteins">
+				{#each record.proteins as pr (pr)}
+					{@const info = proteinInfo.get(pr)}
+					<li title={info?.subcellular_location ?? undefined}>
+						<span class="mono">{pr}</span>
+						{#if info?.is_target}<span class="target">target</span>{/if}
+						{#if info && info.location_class !== 'unknown'}
+							<span class="loc {info.location_class}">{LOCATION_LABEL[info.location_class]}</span>
+						{/if}
+					</li>
+				{/each}
 				{#if !record.proteins.length}<li class="muted">Not stated</li>{/if}
 			</ul>
 		</section>
@@ -116,7 +150,29 @@
 					{#if record.direction}{record.direction}{:else}<span class="muted">Not stated</span>{/if}
 				</dd>
 				<dt>Strength</dt>
-				<dd>{#if record.strength}{record.strength}{:else}<span class="muted">Not stated</span>{/if}</dd>
+				<dd class="with-chip">
+					{#if record.strength_class}<Badge tone={strengthTone(record.strength_class)}>{record.strength_class}</Badge>{/if}
+					{#if record.strength}<span>{record.strength}</span>{:else}<span class="muted">Not stated</span>{/if}
+				</dd>
+				<dt>Plausibility</dt>
+				<dd class="with-chip">
+					{#if record.plausibility_class}
+						<Badge tone={plausibilityTone(record.plausibility_class)}>
+							{PLAUSIBILITY_LABEL[record.plausibility_class]}
+						</Badge>
+					{/if}
+					{#if plausibilityReason(record.plausibility)}
+						<span>{plausibilityReason(record.plausibility)}</span>
+					{:else if !record.plausibility_class}<span class="muted">Not stated</span>{/if}
+				</dd>
+				{#if record.confidence_class && record.confidence_class !== card.confidence}
+					<dt>Confidence</dt>
+					<dd class="with-chip">
+						<Badge tone={confidenceTone(record.confidence_class)}>{record.confidence_class}</Badge>
+						<span class="muted">for this record; the prediction as a whole is rated
+							{card.confidence ?? 'not rated'}</span>
+					</dd>
+				{/if}
 			</dl>
 			{#if steps.length}
 				{#each steps as chain, ci (ci)}
@@ -202,6 +258,7 @@
 		background: var(--surface);
 		border: 1px solid var(--line);
 		border-top: 3px solid var(--orange);
+		box-shadow: var(--card-shadow);
 		border-radius: var(--radius);
 		padding: 20px;
 		display: flex;
@@ -277,7 +334,7 @@
 		gap: 6px;
 	}
 	.records button {
-		background: var(--black);
+		background: var(--bg);
 		border: 1px solid var(--line);
 		border-radius: 8px;
 		padding: 4px 10px;
@@ -289,7 +346,7 @@
 	}
 	.records button[aria-selected='true'] {
 		border-color: var(--green);
-		color: var(--white);
+		color: var(--text);
 	}
 	.chips {
 		display: flex;
@@ -306,8 +363,42 @@
 		padding: 2px 9px;
 		border: 1px solid var(--line);
 		border-radius: 6px;
-		background: var(--black);
+		background: var(--bg);
 		font-size: 0.82rem;
+	}
+	.rationale {
+		margin: -6px 0 0;
+		font-size: 0.88rem;
+		color: var(--muted);
+	}
+	.rationale .label {
+		display: block;
+		margin-bottom: 2px;
+	}
+	.with-chip {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 4px 8px;
+	}
+	.proteins li {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.target {
+		font-size: 0.66rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--green);
+	}
+	.loc {
+		font-size: 0.72rem;
+		color: var(--faint);
+	}
+	.loc.intracellular {
+		color: var(--orange);
 	}
 	.mono {
 		font-family: var(--mono);
@@ -350,7 +441,7 @@
 		width: 10px;
 		height: 10px;
 		border-radius: 50%;
-		background: var(--black);
+		background: var(--bg);
 		border: 2px solid var(--green);
 	}
 	.chain li:last-child {
@@ -366,7 +457,7 @@
 		border-radius: 8px;
 		padding: 8px 12px;
 		margin-bottom: 8px;
-		background: var(--black);
+		background: var(--bg);
 	}
 	.chunk summary {
 		cursor: pointer;

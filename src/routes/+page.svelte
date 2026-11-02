@@ -1,147 +1,303 @@
 <script lang="ts">
-	import Logo from '#lib/components/Logo.svelte';
 	import { onMount } from 'svelte';
-	import { asset } from '$app/paths';
+	import { resolve } from '$app/paths';
 	import type { Snapshot } from '../lib/types';
-	import { buildCards, groupBySoc, runLabel } from '../lib/evidence';
-	import ReasoningBlock from '../lib/components/ReasoningBlock.svelte';
-	import AeCard from '../lib/components/AeCard.svelte';
-	import DetailPanel from '../lib/components/DetailPanel.svelte';
+	import { loadSnapshot } from '../lib/data';
+	import { CONFIDENCE_LABEL, SEVERITY_LABEL, runLabel } from '../lib/evidence';
+	import { pct, runRows, summarize } from '../lib/summary';
+	import SiteHeader from '#lib/components/SiteHeader.svelte';
+	import Badge from '#lib/components/Badge.svelte';
+	import StackBar from '#lib/components/StackBar.svelte';
+	import { confidenceTone, severityTone } from '../lib/components/tones';
 
 	let snapshot = $state<Snapshot | null>(null);
 	let error = $state<string | null>(null);
-	let run = $state('discovery');
-	let peptide = $state('');
-	let selectedId = $state<string | null>(null);
+	let run = $state('');
 
 	onMount(async () => {
 		try {
-			const res = await fetch(asset('data/ae_dashboard_snapshot.json'));
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data: Snapshot = await res.json();
-			const q = new URLSearchParams(location.search);
-			run = data.runs.includes(q.get('run') ?? '') ? q.get('run')! : data.runs[0];
-			peptide = data.peptides.includes(q.get('peptide') ?? '') ? q.get('peptide')! : data.peptides[0];
-			selectedId = q.get('ae');
+			const data = await loadSnapshot();
+			const q = new URLSearchParams(location.search).get('run');
+			run = q && data.runs.includes(q) ? q : data.runs[0];
 			snapshot = data;
 		} catch (e) {
 			error = `Could not load the dataset (${(e as Error).message}).`;
 		}
 	});
 
-	const entry = $derived(snapshot?.entries.find((e) => e.run === run && e.peptide === peptide) ?? null);
-	const cards = $derived(entry ? buildCards(entry) : []);
-	const groups = $derived(groupBySoc(cards));
-	const selected = $derived(cards.find((c) => c.prediction.id === selectedId) ?? null);
-	const counts = $derived({
-		strong: cards.filter((c) => c.strength === 'strong').length,
-		moderate: cards.filter((c) => c.strength === 'moderate').length,
-		weak: cards.filter((c) => c.strength === 'weak').length
-	});
-
-	// keep the view in the URL so a link reopens the same run, peptide and card
 	$effect(() => {
-		if (!snapshot) return;
-		const q = new URLSearchParams({ run, peptide });
-		if (selectedId) q.set('ae', selectedId);
-		history.replaceState(history.state, '', `?${q}`);
+		if (snapshot) history.replaceState(history.state, '', `?${new URLSearchParams({ run })}`);
 	});
 
-	function choose(r: string, p: string) {
-		run = r;
-		peptide = p;
-		selectedId = null;
+	const peptides = $derived(
+		snapshot ? snapshot.entries.filter((e) => e.run === run).map(summarize) : []
+	);
+	const totals = $derived.by(() => {
+		const sum = (f: (s: (typeof peptides)[number]) => number) => peptides.reduce((n, s) => n + f(s), 0);
+		return {
+			predictions: sum((s) => s.cards.length),
+			tp: sum((s) => s.precision?.tp ?? 0),
+			scored: sum((s) => s.precision?.scored ?? 0),
+			high: sum((s) => s.confidence.high),
+			rated: sum((s) => s.cards.length - s.confidence.none),
+			serious: sum((s) => s.serious.length),
+			proteins: sum((s) => s.proteins.length),
+			unlikely: sum((s) => s.triage.unlikely),
+			triaged: sum((s) => s.proteins.length - s.triage.none)
+		};
+	});
+	const rows = $derived(snapshot ? runRows(snapshot) : []);
+	const anyScored = $derived(rows.some((r) => r.scored));
+	const anyConfidence = $derived(rows.some((r) => r.withConfidence));
+
+	function explore(peptide: string, ae?: string) {
+		const q = new URLSearchParams({ run, peptide });
+		if (ae) q.set('ae', ae);
+		return `${resolve('/explore')}?${q}`;
 	}
 
-	function onkeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') selectedId = null;
-	}
+	const generated = $derived(
+		snapshot?.generated_at
+			? new Date(snapshot.generated_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+			: ''
+	);
 </script>
 
-<svelte:window {onkeydown} />
+<svelte:head><title>Summary · Foresight</title></svelte:head>
 
-<header class="topbar">
-	<div class="wrap bar">
-		<div class="brand">
-			<span class="logo"><Logo size={52} /></span>
-			<div>
-				<h1>Foresight</h1>
-				<p>Predicted adverse events and the reasoning behind them</p>
-			</div>
-		</div>
-		{#if snapshot}
-			<div class="controls">
-				<label>
-					<span>Run</span>
-					<select value={run} onchange={(e) => choose(e.currentTarget.value, peptide)}>
-						{#each snapshot.runs as r (r)}<option value={r}>{runLabel(r)}</option>{/each}
-					</select>
-				</label>
-				<label>
-					<span>Peptide</span>
-					<select value={peptide} onchange={(e) => choose(run, e.currentTarget.value)}>
-						{#each snapshot.peptides as p (p)}<option value={p}>{p}</option>{/each}
-					</select>
-				</label>
-			</div>
-		{/if}
-	</div>
-</header>
+<SiteHeader>
+	{#if snapshot}
+		<label class="pick">
+			<span>Run</span>
+			<select bind:value={run}>
+				{#each snapshot.runs as r (r)}<option value={r}>{runLabel(r)}</option>{/each}
+			</select>
+		</label>
+	{/if}
+</SiteHeader>
 
 <main class="wrap">
 	{#if error}
 		<p class="status error">{error}</p>
 	{:else if !snapshot}
 		<p class="status">Loading predictions…</p>
-	{:else if !entry}
-		<p class="status">No predictions for {peptide} in {runLabel(run)}.</p>
 	{:else}
-		<div class="title-row">
-			<h2>{peptide} <span>· {runLabel(run)}</span></h2>
-			<p class="snapshot">Snapshot: {snapshot.label}</p>
-		</div>
+		<section class="hero" aria-labelledby="hero-title">
+			<p class="eyebrow">Executive summary · {snapshot.label}{generated ? ` · built ${generated}` : ''}</p>
+			<h1 id="hero-title">{runLabel(run)}: predicted safety profile for {peptides.length} peptide{peptides.length === 1 ? '' : 's'}</h1>
+			<p class="lead">
+				Foresight predicted <strong>{totals.predictions}</strong> adverse events across
+				{peptides.map((p) => p.entry.peptide).join(', ')}.
+				{#if totals.scored}
+					Of the {totals.scored} it could be scored on, <strong>{pct(totals.tp, totals.scored)}</strong> matched
+					the drug label.
+				{/if}
+				{#if totals.rated}
+					<strong>{totals.high}</strong> {totals.high === 1 ? 'is' : 'are'} rated high confidence.
+				{/if}
+				{#if totals.serious}
+					<strong>{totals.serious}</strong> {totals.serious === 1 ? 'is' : 'are'} predicted severe or fatal.
+				{/if}
+			</p>
+		</section>
 
-		<ReasoningBlock thinking={entry.thinking_summary} response={entry.response_reasoning} />
-
-		<ul class="stats" aria-label="Summary">
-			<li><strong>{cards.length}</strong> predicted AEs</li>
-			<li><strong>{groups.length}</strong> organ classes</li>
-			<li class="g"><strong>{counts.strong}</strong> strong</li>
-			<li><strong>{counts.moderate}</strong> moderate</li>
-			<li class="o"><strong>{counts.weak}</strong> weak</li>
-			<li><strong>{entry.rag.chunk_count}</strong> retrieved chunks</li>
+		<ul class="kpis" aria-label="Headline numbers">
+			<li>
+				<span class="k-label">Predicted AEs</span>
+				<span class="k-value">{totals.predictions}</span>
+				<span class="k-sub">across {peptides.length} peptide{peptides.length === 1 ? '' : 's'}</span>
+			</li>
+			<li>
+				<span class="k-label">Matched the label</span>
+				<span class="k-value">{totals.scored ? pct(totals.tp, totals.scored) : '–'}</span>
+				<span class="k-sub">{totals.scored ? `${totals.tp} of ${totals.scored} scored predictions (precision)` : 'No benchmark for this run'}</span>
+			</li>
+			<li>
+				<span class="k-label">High confidence</span>
+				<span class="k-value">{totals.rated ? totals.high : '–'}</span>
+				<span class="k-sub">{totals.rated ? `of ${totals.rated} rated predictions` : 'Confidence not rated in this run'}</span>
+			</li>
+			<li>
+				<span class="k-label">Severe or fatal</span>
+				<span class="k-value o">{totals.serious}</span>
+				<span class="k-sub">predicted events to watch</span>
+			</li>
+			<li>
+				<span class="k-label">Proteins ruled out</span>
+				<span class="k-value">{totals.triaged ? totals.unlikely : '–'}</span>
+				<span class="k-sub">{totals.triaged ? `of ${totals.triaged} triaged as unlikely to be perturbed` : 'No protein triage in this run'}</span>
+			</li>
 		</ul>
 
-		<div class="layout" class:has-detail={!!selected}>
-			<div class="groups">
-				{#each groups as g (g.soc)}
-					<section class="group" aria-labelledby="soc-{g.soc}">
-						<h3 id="soc-{g.soc}">{g.soc} <span>{g.cards.length}</span></h3>
-						<div class="cards">
-							{#each g.cards as c (c.prediction.id)}
-								<AeCard
-									card={c}
-									selected={c.prediction.id === selectedId}
-									onselect={() =>
-										(selectedId = selectedId === c.prediction.id ? null : c.prediction.id)}
-								/>
-							{/each}
-						</div>
-					</section>
-				{/each}
-				<p class="legend">
-					Cards are sorted from strongest to weakest stated evidence. A dashed card means the run had
-					no per-AE record, so its evidence comes from the protein reasoning that names it.
-				</p>
-			</div>
+		<section aria-labelledby="peptides-title">
+			<h2 id="peptides-title" class="section-title">By peptide</h2>
+			<div class="peptides">
+				{#each peptides as s (s.entry.id)}
+					<article class="pep">
+						<header>
+							<div>
+								<h3>{s.entry.peptide}</h3>
+								{#if s.targets.length}
+									<p class="targets">Intended target: <span class="mono">{s.targets.map((t) => t.gene).join(', ')}</span></p>
+								{/if}
+							</div>
+							<div class="pep-stats">
+								<span><strong>{s.cards.length}</strong> AEs</span>
+								{#if s.precision}<span><strong>{Math.round(s.precision.pct)}%</strong> matched label</span>{/if}
+							</div>
+						</header>
 
-			{#if selected}
-				<button class="backdrop" aria-label="Close details" onclick={() => (selectedId = null)}></button>
-				<div class="detail">
-					<DetailPanel card={selected} {entry} onclose={() => (selectedId = null)} />
+						<div class="bars">
+							<StackBar
+								label="Severity"
+								segments={[
+									{ label: 'Mild / moderate', value: s.severity.mild_moderate, color: 'var(--green)' },
+									{ label: 'Severe', value: s.severity.severe, color: 'var(--orange)' },
+									{ label: 'Fatal', value: s.severity.fatal, color: 'var(--red)' },
+									{ label: 'Unknown', value: s.severity.unknown, color: 'var(--line-strong)' }
+								]}
+							/>
+							{#if s.confidence.none < s.cards.length}
+							<StackBar
+								label="Confidence of prediction"
+								segments={[
+									{ label: 'High', value: s.confidence.high, color: 'var(--green)' },
+									{ label: 'Medium', value: s.confidence.medium, color: 'var(--neutral-mark)' },
+									{ label: 'Low', value: s.confidence.low, color: 'var(--orange)' },
+									{ label: 'Not rated', value: s.confidence.none, color: 'var(--line-strong)' }
+								]}
+							/>
+							{/if}
+							{#if s.triage.none < s.proteins.length}
+							<StackBar
+								label="Protein triage"
+								segments={[
+									{ label: 'Likely', value: s.triage.likely, color: 'var(--green)' },
+									{ label: 'Uncertain', value: s.triage.uncertain, color: 'var(--orange)' },
+									{ label: 'Unlikely', value: s.triage.unlikely, color: 'var(--red)' },
+									{ label: 'Not stated', value: s.triage.none, color: 'var(--line-strong)' }
+								]}
+							/>
+							{/if}
+							{#if s.confidence.none === s.cards.length || s.triage.none === s.proteins.length}
+								<p class="muted small">
+									{[
+										s.confidence.none === s.cards.length ? 'Confidence' : null,
+										s.triage.none === s.proteins.length ? 'protein triage' : null
+									]
+										.filter(Boolean)
+										.join(' and ')
+										.replace(/^p/, 'P')} not reported in this run.
+								</p>
+							{/if}
+						</div>
+
+						<div class="lists">
+							<div>
+								<h4>Top predictions</h4>
+								<ol class="aes">
+									{#each s.headline as c (c.prediction.id)}
+										<li>
+											<a href={explore(s.entry.peptide, c.prediction.id)}>{c.prediction.term}</a>
+											<span class="freq">{c.prediction.frequency_text ?? '–'}</span>
+											{#if c.confidence}
+												<Badge tone={confidenceTone(c.confidence)}>{CONFIDENCE_LABEL[c.confidence]}</Badge>
+											{:else}<span></span>{/if}
+											{#if c.prediction.score_status === 'TP'}<span class="tp" title="Matched the label">✓ label</span>{:else}<span class="tp no">{c.prediction.score_status === 'FP' ? 'not in label' : ''}</span>{/if}
+										</li>
+									{/each}
+								</ol>
+							</div>
+							<div>
+								<h4>Severe or fatal</h4>
+								{#if s.serious.length}
+									<ul class="aes">
+										{#each s.serious.slice(0, 5) as c (c.prediction.id)}
+											<li>
+												<a href={explore(s.entry.peptide, c.prediction.id)}>{c.prediction.term}</a>
+												<span class="freq">{c.prediction.frequency_text ?? '–'}</span>
+												<Badge tone={severityTone(c.prediction.severity_normalized)}>
+													{SEVERITY_LABEL[c.prediction.severity_normalized]}
+												</Badge>
+												<span class="tp {c.prediction.score_status === 'TP' ? '' : 'no'}">{c.prediction.score_status === 'TP' ? '✓ label' : c.prediction.score_status === 'FP' ? 'not in label' : ''}</span>
+											</li>
+										{/each}
+										{#if s.serious.length > 5}<li class="more">+{s.serious.length - 5} more</li>{/if}
+									</ul>
+								{:else}
+									<p class="muted">None predicted.</p>
+								{/if}
+							</div>
+						</div>
+
+						<a class="open" href={explore(s.entry.peptide)}>Open {s.entry.peptide} in the explorer →</a>
+					</article>
+				{/each}
+			</div>
+		</section>
+
+		<section aria-labelledby="runs-title">
+			<h2 id="runs-title" class="section-title">How the runs compare</h2>
+			<div class="table-card">
+				<table>
+					<thead>
+						<tr>
+							<th scope="col">Run</th>
+							<th scope="col" class="num">Predicted AEs</th>
+							{#if anyScored}
+								<th scope="col" class="num">Matched label</th>
+								<th scope="col" class="wide">Precision</th>
+							{/if}
+							{#if anyConfidence}<th scope="col" class="num">High confidence</th>{/if}
+							<th scope="col" class="num">Severe / fatal</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each rows as r (r.run)}
+							<tr class:current={r.run === run}>
+								<th scope="row"><button onclick={() => (run = r.run)}>{runLabel(r.run)}</button></th>
+								<td class="num">{r.predictions}</td>
+								{#if anyScored}
+									<td class="num">{r.scored ? `${r.tp} / ${r.scored}` : '–'}</td>
+									<td class="wide">
+										{#if r.scored}
+											<span class="meter" title="{pct(r.tp, r.scored)} of scored predictions matched the label">
+												<span style="width: {(100 * r.tp) / r.scored}%"></span>
+											</span>
+											<span class="meter-val">{pct(r.tp, r.scored)}</span>
+										{:else}–{/if}
+									</td>
+								{/if}
+								{#if anyConfidence}<td class="num">{r.withConfidence ? `${r.highConfidence} / ${r.withConfidence}` : '–'}</td>{/if}
+								<td class="num">{r.serious}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+			<p class="foot">
+				Precision is the share of scored predictions that matched an AE on the drug label. Recall is not
+				shown here because the snapshot does not carry the full label list. Select a run to update the page.
+			</p>
+		</section>
+
+		<section class="glossary" aria-labelledby="glossary-title">
+			<h2 id="glossary-title" class="section-title">How to read the ratings</h2>
+			<dl>
+				<div>
+					<dt>Confidence of prediction</dt>
+					<dd>How much the model trusts its own prediction (the AE, its frequency and severity together) to hold up against real outcomes. It is not how likely the event is; that is the frequency.</dd>
 				</div>
-			{/if}
-		</div>
+				<div>
+					<dt>Evidence strength</dt>
+					<dd>How good the evidence linking the protein to the AE is in general: strong, moderate or weak.</dd>
+				</div>
+				<div>
+					<dt>Protein triage</dt>
+					<dd>Whether the peptide is likely to perturb each protein at all, weighing whether it can reach it (subcellular location), pharmacological precedent and housekeeping-artefact status. The intended target is exempt.</dd>
+				</div>
+			</dl>
+		</section>
 	{/if}
 </main>
 
@@ -149,49 +305,15 @@
 	.wrap {
 		max-width: 1440px;
 		margin: 0 auto;
-		padding: 0 24px;
+		padding-inline: 24px;
 	}
-	.topbar {
-		position: sticky;
-		top: 0;
-		z-index: 10;
-		background: rgba(11, 11, 11, 0.92);
-		backdrop-filter: blur(8px);
-		border-bottom: 1px solid var(--line);
-	}
-	.bar {
+	main {
+		padding-block: 40px 72px;
 		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		padding-block: 14px;
+		flex-direction: column;
+		gap: 36px;
 	}
-	.brand {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-	}
-	.logo {
-		display: grid;
-		place-items: center;
-	}
-	h1 {
-		margin: 0;
-		font-size: 1.15rem;
-		letter-spacing: 0.02em;
-	}
-	.brand p {
-		margin: 0;
-		color: var(--faint);
-		font-size: 0.8rem;
-	}
-	.controls {
-		display: flex;
-		gap: 12px;
-		flex-wrap: wrap;
-	}
-	label {
+	.pick {
 		display: flex;
 		align-items: center;
 		gap: 8px;
@@ -200,7 +322,7 @@
 	}
 	select {
 		background: var(--surface);
-		color: var(--white);
+		color: var(--text);
 		border: 1px solid var(--line-strong);
 		border-radius: 8px;
 		padding: 6px 10px;
@@ -210,112 +332,320 @@
 	select:hover {
 		border-color: var(--green);
 	}
-	main {
-		padding-block: 24px 64px;
-		display: flex;
-		flex-direction: column;
-		gap: 20px;
+	.hero {
+		max-width: 920px;
 	}
-	.title-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 8px;
+	.eyebrow {
+		margin: 0 0 8px;
+		color: var(--orange);
+		font-size: 0.78rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
 	}
-	.title-row h2 {
+	h1 {
+		margin: 0 0 12px;
+		font-size: clamp(1.6rem, 3vw, 2.3rem);
+		line-height: 1.15;
+		text-wrap: balance;
+	}
+	.lead {
 		margin: 0;
-		font-size: 1.7rem;
+		font-size: 1.08rem;
+		color: var(--muted);
+		text-wrap: pretty;
 	}
-	.title-row h2 span {
-		color: var(--faint);
-		font-weight: 500;
+	.lead strong {
+		color: var(--text);
 	}
-	.snapshot {
-		margin: 0;
-		color: var(--faint);
-		font-size: 0.8rem;
-	}
-	.stats {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
+	.kpis {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+		gap: 12px;
 		margin: 0;
 		padding: 0;
 		list-style: none;
 	}
-	.stats li {
+	.kpis li {
 		background: var(--surface);
 		border: 1px solid var(--line);
-		border-radius: 999px;
-		padding: 4px 14px;
-		color: var(--muted);
-		font-size: 0.85rem;
-	}
-	.stats strong {
-		color: var(--white);
-		margin-right: 4px;
-	}
-	.stats .g strong {
-		color: var(--green);
-	}
-	.stats .o strong {
-		color: var(--orange);
-	}
-	.layout {
-		display: grid;
-		grid-template-columns: 1fr;
-		gap: 24px;
-		align-items: start;
-	}
-	.layout.has-detail {
-		grid-template-columns: minmax(0, 1fr) minmax(360px, 460px);
-	}
-	.groups {
+		border-radius: var(--radius);
+		padding: 16px 18px;
 		display: flex;
 		flex-direction: column;
-		gap: 28px;
+		gap: 2px;
+		box-shadow: var(--card-shadow);
 	}
-	.group h3 {
-		margin: 0 0 12px;
+	.k-label {
+		color: var(--faint);
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+	.k-value {
+		font-size: 2.1rem;
+		font-weight: 700;
+		font-variant-numeric: tabular-nums;
+		line-height: 1.2;
+	}
+	.k-sub {
+		color: var(--muted);
+		font-size: 0.82rem;
+	}
+	.section-title {
+		margin: 0 0 14px;
 		font-size: 0.85rem;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
-		color: var(--white);
 		display: flex;
 		align-items: center;
 		gap: 8px;
 	}
-	.group h3::before {
+	.section-title::before {
 		content: '';
 		width: 4px;
 		height: 1em;
 		background: var(--orange);
 		border-radius: 2px;
 	}
-	.group h3 span {
-		color: var(--faint);
-		font-weight: 500;
-	}
-	.cards {
+	.peptides {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+		gap: 16px;
+	}
+	.pep {
+		background: var(--surface);
+		border: 1px solid var(--line);
+		border-top: 3px solid var(--green);
+		border-radius: var(--radius);
+		padding: 18px 20px;
+		display: flex;
+		flex-direction: column;
+		gap: 18px;
+		box-shadow: var(--card-shadow);
+	}
+	.pep header {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
 		gap: 12px;
 	}
-	.detail {
-		position: sticky;
-		top: 88px;
-		max-height: calc(100vh - 104px);
-		overflow-y: auto;
+	h3 {
+		margin: 0;
+		font-size: 1.35rem;
+	}
+	.targets {
+		margin: 2px 0 0;
+		color: var(--faint);
+		font-size: 0.82rem;
+	}
+	.mono {
+		font-family: var(--mono);
+		color: var(--text);
+	}
+	.pep-stats {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		color: var(--muted);
+		font-size: 0.85rem;
+		white-space: nowrap;
+	}
+	.pep-stats strong {
+		color: var(--text);
+		font-size: 1rem;
+	}
+	.bars {
+		display: grid;
+		gap: 14px;
+	}
+	.lists {
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 16px;
+	}
+	.small {
+		font-size: 0.8rem;
+	}
+	h4 {
+		margin: 0 0 8px;
+		color: var(--faint);
+		font-size: 0.72rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+	.aes {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		font-size: 0.88rem;
+	}
+	.aes li {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto auto auto;
+		align-items: center;
+		gap: 10px;
+		padding-bottom: 6px;
+		border-bottom: 1px solid var(--line);
+	}
+	.aes li:last-child {
+		border-bottom: 0;
+		padding-bottom: 0;
+	}
+	.aes li.more {
+		display: block;
+	}
+	.aes a {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.aes a {
+		color: var(--text);
+		font-weight: 600;
+		text-decoration: none;
+	}
+	.aes a:hover {
+		color: var(--green);
+		text-decoration: underline;
+	}
+	.freq {
+		color: var(--muted);
+		font-variant-numeric: tabular-nums;
+	}
+	.tp.no {
+		color: var(--faint);
+		font-weight: 400;
+	}
+	.tp {
+		min-width: 4.5em;
+		color: var(--green);
+		font-size: 0.75rem;
+		font-weight: 600;
+	}
+	.more,
+	.muted {
+		color: var(--faint);
+		margin: 0;
+		font-size: 0.85rem;
+	}
+	.open {
+		align-self: flex-start;
+		font-weight: 600;
+		font-size: 0.88rem;
+		text-decoration: none;
+	}
+	.open:hover {
+		text-decoration: underline;
+	}
+	.table-card {
+		background: var(--surface);
+		border: 1px solid var(--line);
 		border-radius: var(--radius);
+		padding: 6px 18px;
+		overflow-x: auto;
+		box-shadow: var(--card-shadow);
 	}
-	.backdrop {
-		display: none;
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.9rem;
 	}
-	.legend {
+	th,
+	td {
+		text-align: left;
+		padding: 10px 12px 10px 0;
+		border-bottom: 1px solid var(--line);
+		white-space: nowrap;
+	}
+	thead th {
+		color: var(--faint);
+		font-size: 0.72rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+	}
+	tbody tr:last-child th,
+	tbody tr:last-child td {
+		border-bottom: 0;
+	}
+	.num {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+	.wide {
+		width: 34%;
+		min-width: 180px;
+	}
+	tbody th button {
+		background: none;
+		border: 0;
+		padding: 0;
+		cursor: pointer;
+		font-weight: 600;
+		color: var(--text);
+	}
+	tbody th button:hover {
+		color: var(--green);
+	}
+	tr.current th button {
+		color: var(--green);
+	}
+	tr.current {
+		background: var(--green-soft);
+	}
+	.meter {
+		display: inline-block;
+		vertical-align: middle;
+		width: calc(100% - 48px);
+		height: 8px;
+		border-radius: 4px;
+		background: var(--line);
+		overflow: hidden;
+	}
+	.meter span {
+		display: block;
+		height: 100%;
+		background: var(--green);
+		border-radius: 4px;
+	}
+	.meter-val {
+		display: inline-block;
+		width: 40px;
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+	.foot {
+		margin: 10px 0 0;
 		color: var(--faint);
 		font-size: 0.8rem;
+	}
+	.glossary dl {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		gap: 12px;
 		margin: 0;
+	}
+	.glossary dl div {
+		border-left: 2px solid var(--line-strong);
+		padding: 2px 0 2px 14px;
+	}
+	dt {
+		font-weight: 650;
+		margin-bottom: 4px;
+	}
+	dd {
+		margin: 0;
+		color: var(--muted);
+		font-size: 0.88rem;
+	}
+	.k-value.o {
+		color: var(--orange);
 	}
 	.status {
 		color: var(--muted);
@@ -324,30 +654,12 @@
 	.status.error {
 		color: var(--orange);
 	}
-
 	@media (max-width: 900px) {
 		.wrap {
-			padding: 0 16px;
+			padding-inline: 16px;
 		}
-		.layout.has-detail {
+		.lists {
 			grid-template-columns: 1fr;
-		}
-		.backdrop {
-			display: block;
-			position: fixed;
-			inset: 0;
-			z-index: 15;
-			border: 0;
-			background: rgba(0, 0, 0, 0.6);
-		}
-		.detail {
-			position: fixed;
-			inset: auto 0 0 0;
-			top: 15vh;
-			max-height: none;
-			z-index: 20;
-			border-radius: var(--radius) var(--radius) 0 0;
-			box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.6);
 		}
 	}
 </style>

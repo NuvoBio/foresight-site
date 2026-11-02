@@ -66,7 +66,7 @@
 	.tabs {
 		display: flex;
 		gap: 4px;
-		background: var(--black);
+		background: var(--bg);
 		border: 1px solid var(--line);
 		border-radius: 999px;
 		padding: 3px;
@@ -82,7 +82,7 @@
 	}
 	.tabs button[aria-selected='true'] {
 		background: var(--green);
-		color: var(--black);
+		color: var(--on-accent);
 		font-weight: 600;
 	}
 	.body {
@@ -115,7 +115,7 @@
 		border-radius: 999px;
 		padding: 4px 14px;
 		cursor: pointer;
-		color: var(--white);
+		color: var(--text);
 	}
 	.toggle:hover {
 		border-color: var(--green);

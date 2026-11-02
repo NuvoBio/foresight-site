@@ -1,6 +1,11 @@
 // Shape of static/data/ae_dashboard_snapshot.json (see the parser's README for every field).
 
 export type StrengthClass = 'strong' | 'moderate' | 'weak' | null;
+export type ConfidenceClass = 'high' | 'medium' | 'low' | null;
+export type PlausibilityClass = 'likely' | 'uncertain' | 'unlikely' | null;
+export type LocationClass = 'cell_surface' | 'secreted' | 'intracellular' | 'unknown';
+
+// Fields marked "schema 2" are absent from snapshots built before 2026-11-02, so they are optional here.
 
 export interface EvidenceRecord {
 	id: string;
@@ -18,6 +23,13 @@ export interface EvidenceRecord {
 	pmids: string[];
 	strength: string | null;
 	strength_class: StrengthClass;
+	/** Step 1 triage verdict for this record's protein(s), with its reason. */
+	plausibility?: string | null;
+	plausibility_class?: PlausibilityClass;
+	/** Confidence of prediction (schema 2). */
+	confidence?: string | null;
+	confidence_class?: ConfidenceClass;
+	confidence_rationale?: string | null;
 	frequency_hint: string | null;
 	severity_hint: string | null;
 	borrowed_fields: Record<string, string>;
@@ -39,6 +51,11 @@ export interface Prediction {
 	preferred_term: string | null;
 	score_status: string | null;
 	score_match: string | null;
+	/** schema 2: from '| Confidence:' on the predictions line, else the first linked record that states one */
+	confidence?: string | null;
+	confidence_class?: ConfidenceClass;
+	confidence_rationale?: string | null;
+	confidence_source?: 'predictions_line' | 'evidence_record' | null;
 	evidence_status: 'explicit' | 'inferred' | 'none';
 	evidence_record_ids: string[];
 	match_methods: Record<string, string>;
@@ -70,7 +87,27 @@ export interface ProteinSection {
 	line_end: number;
 	pmids: string[];
 	pathways: string[];
+	plausibility?: string | null;
+	plausibility_class?: PlausibilityClass;
+	confidence?: string | null;
+	location?: string | null;
 	text: string;
+}
+
+/** One protein of the run's list (schema 2): shortlist annotations merged with the Step 1 triage. */
+export interface ProteinInfo {
+	gene: string;
+	accession: string | null;
+	name: string | null;
+	subcellular_location: string | null;
+	location_class: LocationClass;
+	location_source: 'shortlist' | 'reasoning' | null;
+	is_target: boolean;
+	rank: number | null;
+	score: number | null;
+	plausibility: string | null;
+	plausibility_class: PlausibilityClass;
+	prediction_ids: string[];
 }
 
 export interface Entry {
@@ -80,6 +117,8 @@ export interface Entry {
 	predictions: Prediction[];
 	evidence_records: EvidenceRecord[];
 	protein_sections: ProteinSection[];
+	proteins?: ProteinInfo[];
+	protein_list_size?: number;
 	thinking_summary: string;
 	response_reasoning: string;
 	rag: { context_source?: string; chunk_count: number };
@@ -102,5 +141,8 @@ export interface AeCardData {
 	evidence: EvidenceRecord[];
 	primary: EvidenceRecord | null;
 	strength: StrengthClass;
+	confidence: ConfidenceClass;
+	/** the weakest triage verdict among the linked records' proteins */
+	plausibility: PlausibilityClass;
 	rank: number;
 }

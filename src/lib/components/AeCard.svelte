@@ -2,7 +2,7 @@
 	import type { AeCardData } from '../types';
 	import { SEVERITY_LABEL, freqBarWidth } from '../evidence';
 	import Badge from './Badge.svelte';
-	import { severityTone, strengthTone } from './tones';
+	import { confidenceTone, severityTone, strengthTone } from './tones';
 
 	interface Props {
 		card: AeCardData;
@@ -41,12 +41,22 @@
 		<Badge tone={strengthTone(card.strength)}>
 			{card.strength ? `${card.strength} evidence` : 'strength not stated'}
 		</Badge>
+		{#if card.confidence}
+			<Badge tone={confidenceTone(card.confidence)}>{card.confidence} confidence</Badge>
+		{/if}
 		{#if p.evidence_status === 'inferred'}
 			<span class="note">from protein reasoning</span>
 		{:else if p.evidence_status === 'none'}
 			<span class="note warn">no evidence found</span>
 		{/if}
 	</div>
+
+	{#if card.plausibility === 'uncertain' || card.plausibility === 'unlikely'}
+		<p class="triage">
+			<span aria-hidden="true">⚠</span>
+			Depends on a protein triaged as {card.plausibility === 'unlikely' ? 'unlikely' : 'uncertain'} to be perturbed
+		</p>
+	{/if}
 
 	{#if proteins.length}
 		<ul class="proteins" aria-label="Proteins">
@@ -74,6 +84,14 @@
 			border-color 0.15s,
 			transform 0.15s,
 			background 0.15s;
+	}
+	.card {
+		box-shadow: var(--card-shadow);
+	}
+	.triage {
+		margin: 0;
+		font-size: 0.75rem;
+		color: var(--orange);
 	}
 	.card:hover {
 		border-color: var(--line-strong);
@@ -155,9 +173,9 @@
 		font-size: 0.72rem;
 		padding: 1px 6px;
 		border-radius: 4px;
-		background: var(--black);
+		background: var(--bg);
 		border: 1px solid var(--line);
-		color: var(--white);
+		color: var(--text);
 	}
 	.proteins .more {
 		color: var(--faint);

@@ -34,7 +34,7 @@
 		background: var(--orange-soft);
 	}
 	.orange-solid {
-		color: var(--black);
+		color: var(--on-accent);
 		background: var(--orange);
 		border-color: var(--orange);
 	}
