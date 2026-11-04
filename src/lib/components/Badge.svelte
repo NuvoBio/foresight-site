@@ -2,12 +2,14 @@
 	import type { Snippet } from 'svelte';
 	interface Props {
 		tone?: 'green' | 'orange' | 'orange-solid' | 'neutral';
+		/** fill the width it is given, label centred, so a column of badges lines up at one size */
+		fill?: boolean;
 		children: Snippet;
 	}
-	let { tone = 'neutral', children }: Props = $props();
+	let { tone = 'neutral', fill = false, children }: Props = $props();
 </script>
 
-<span class="badge {tone}">{@render children()}</span>
+<span class="badge {tone}" class:fill>{@render children()}</span>
 
 <style>
 	.badge {
@@ -22,6 +24,11 @@
 		white-space: nowrap;
 		border: 1px solid var(--line-strong);
 		color: var(--muted);
+	}
+	.fill {
+		display: flex;
+		justify-content: center;
+		width: 100%;
 	}
 	.green {
 		color: var(--green);

@@ -3,7 +3,6 @@
 	import { LOCATION_LABEL, PLAUSIBILITY_LABEL, plausibilityReason } from '../evidence';
 	import { proteinsOf } from '../summary';
 	import Badge from './Badge.svelte';
-	import { plausibilityTone } from './tones';
 
 	interface Props {
 		entry: Entry;
@@ -12,9 +11,28 @@
 	}
 	let { entry, cards, onselect }: Props = $props();
 
-	const proteins = $derived(proteinsOf(entry));
+	const ORDER: Record<string, number> = { likely: 0, uncertain: 1, unlikely: 2 };
+	// intended target first, then by triage verdict, keeping the list order within each
+	const proteins = $derived(
+		proteinsOf(entry)
+			.map((p, i) => ({ p, i }))
+			.sort(
+				(a, b) =>
+					Number(b.p.is_target) - Number(a.p.is_target) ||
+					(ORDER[a.p.plausibility_class ?? ''] ?? 3) - (ORDER[b.p.plausibility_class ?? ''] ?? 3) ||
+					a.i - b.i
+			)
+			.map(({ p }) => p)
+	);
 	const hasLocations = $derived(proteins.some((p) => p.location_class !== 'unknown'));
 	const hasTriage = $derived(proteins.some((p) => p.plausibility_class));
+	const hasRank = $derived(proteins.some((p) => p.rank != null));
+	/** the triage reason, unless it only repeats the verdict ('likely perturbed') */
+	function reason(p: ProteinInfo): string | null {
+		const r = plausibilityReason(p.plausibility);
+		if (!r) return null;
+		return /^(?:likely|unlikely|uncertain)(?:\s+perturbed)?\.?$/i.test(r.trim()) ? null : r;
+	}
 	const termById = $derived(new Map(cards.map((c) => [c.prediction.id, c.prediction.term])));
 	const count = (f: (p: ProteinInfo) => boolean) => proteins.filter(f).length;
 </script>
@@ -26,9 +44,10 @@
 			<span class="chips">
 				<span class="n">{entry.protein_list_size ?? proteins.length} proteins</span>
 				{#if hasTriage}
-					<Badge tone="green">{count((p) => p.plausibility_class === 'likely')} likely</Badge>
-					<Badge tone="orange">{count((p) => p.plausibility_class === 'uncertain')} uncertain</Badge>
-					<Badge tone="orange-solid">{count((p) => p.plausibility_class === 'unlikely')} unlikely</Badge>
+					{#each [['likely', 'green'], ['uncertain', 'orange'], ['unlikely', 'orange-solid']] as const as [cls, tone] (cls)}
+						{@const n = count((p) => p.plausibility_class === cls)}
+						{#if n}<Badge {tone}>{n} {cls}</Badge>{/if}
+					{/each}
 				{/if}
 				{#if hasLocations}
 					<span class="n">
@@ -53,35 +72,36 @@
 				<thead>
 					<tr>
 						<th scope="col">Protein</th>
-						<th scope="col">Location</th>
-						<th scope="col">Triage</th>
-						<th scope="col" class="num">Rank</th>
+						{#if hasLocations}<th scope="col">Location</th>{/if}
+						{#if hasRank}<th scope="col" class="num">Rank</th>{/if}
 						<th scope="col">Predicted AEs</th>
 					</tr>
 				</thead>
 				<tbody>
 					{#each proteins as p (p.gene)}
 						<tr class:dim={p.plausibility_class === 'unlikely'}>
-							<td>
-								<span class="gene">{p.gene}</span>
+							<td class="prot">
+								<span class="gene">
+									{#if p.plausibility_class}
+										<span
+											class="dot {p.plausibility_class}"
+											title={PLAUSIBILITY_LABEL[p.plausibility_class]}
+											aria-label={PLAUSIBILITY_LABEL[p.plausibility_class]}
+										></span>
+									{/if}
+									{p.gene}
+								</span>
 								{#if p.is_target}<span class="target" title="Intended target">target</span>{/if}
 								{#if p.name}<span class="sub">{p.name}</span>{/if}
+								{#if reason(p)}<span class="sub why">{reason(p)}</span>{/if}
 							</td>
-							<td>
-								<span class="loc {p.location_class}">{LOCATION_LABEL[p.location_class]}</span>
-								{#if p.subcellular_location}<span class="sub">{p.subcellular_location}</span>{/if}
-							</td>
-							<td>
-								{#if p.plausibility_class}
-									<Badge tone={plausibilityTone(p.plausibility_class)}>
-										{PLAUSIBILITY_LABEL[p.plausibility_class]}
-									</Badge>
-									{#if plausibilityReason(p.plausibility)}
-										<span class="sub">{plausibilityReason(p.plausibility)}</span>
-									{/if}
-								{:else}<span class="sub">Not stated</span>{/if}
-							</td>
-							<td class="num">{p.rank ?? '–'}</td>
+							{#if hasLocations}
+								<td>
+									<span class="loc {p.location_class}">{LOCATION_LABEL[p.location_class]}</span>
+									{#if p.subcellular_location}<span class="sub">{p.subcellular_location}</span>{/if}
+								</td>
+							{/if}
+							{#if hasRank}<td class="num">{p.rank ?? '–'}</td>{/if}
 							<td>
 								{#if p.prediction_ids.length}
 									<span class="aes">
@@ -170,6 +190,32 @@
 	.gene {
 		font-family: var(--mono);
 		font-weight: 600;
+	}
+	.prot {
+		width: 260px;
+	}
+	.dot {
+		display: inline-block;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		margin-right: 6px;
+		vertical-align: 1px;
+		background: var(--line-strong);
+	}
+	.dot.likely {
+		background: var(--green);
+	}
+	/* same encoding as the header tags: uncertain = orange outline, unlikely = solid orange */
+	.dot.uncertain {
+		background: var(--orange-soft);
+		box-shadow: inset 0 0 0 1.5px var(--orange);
+	}
+	.dot.unlikely {
+		background: var(--orange);
+	}
+	.why {
+		font-style: italic;
 	}
 	.target {
 		margin-left: 6px;

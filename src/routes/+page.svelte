@@ -65,6 +65,16 @@
 
 <svelte:head><title>Summary · Foresight</title></svelte:head>
 
+{#snippet labelTag(status: string | null)}
+	{#if status === 'TP'}
+		<span class="tp" title="Matched an AE on the drug label">✓ label</span>
+	{:else if status === 'FP'}
+		<span class="tp no" title="Not on the drug label">not in label</span>
+	{:else}
+		<span class="tp no"></span>
+	{/if}
+{/snippet}
+
 <SiteHeader>
 	{#if snapshot}
 		<label class="pick">
@@ -195,15 +205,19 @@
 						<div class="lists">
 							<div>
 								<h4>Top predictions</h4>
-								<ol class="aes">
+								<ol class="aes" class:no-conf={!s.headline.some((c) => c.confidence)}>
 									{#each s.headline as c (c.prediction.id)}
 										<li>
-											<a href={explore(s.entry.peptide, c.prediction.id)}>{c.prediction.term}</a>
+											<a href={explore(s.entry.peptide, c.prediction.id)} title={c.prediction.term}>{c.prediction.term}</a>
 											<span class="freq">{c.prediction.frequency_text ?? '–'}</span>
-											{#if c.confidence}
-												<Badge tone={confidenceTone(c.confidence)}>{CONFIDENCE_LABEL[c.confidence]}</Badge>
-											{:else}<span></span>{/if}
-											{#if c.prediction.score_status === 'TP'}<span class="tp" title="Matched the label">✓ label</span>{:else}<span class="tp no">{c.prediction.score_status === 'FP' ? 'not in label' : ''}</span>{/if}
+											{#if s.headline.some((x) => x.confidence)}
+												<span class="ind">
+													{#if c.confidence}
+														<Badge fill tone={confidenceTone(c.confidence)}>{CONFIDENCE_LABEL[c.confidence]}</Badge>
+													{:else}<Badge fill>Not rated</Badge>{/if}
+												</span>
+											{/if}
+											{@render labelTag(c.prediction.score_status)}
 										</li>
 									{/each}
 								</ol>
@@ -214,12 +228,14 @@
 									<ul class="aes">
 										{#each s.serious.slice(0, 5) as c (c.prediction.id)}
 											<li>
-												<a href={explore(s.entry.peptide, c.prediction.id)}>{c.prediction.term}</a>
+												<a href={explore(s.entry.peptide, c.prediction.id)} title={c.prediction.term}>{c.prediction.term}</a>
 												<span class="freq">{c.prediction.frequency_text ?? '–'}</span>
-												<Badge tone={severityTone(c.prediction.severity_normalized)}>
-													{SEVERITY_LABEL[c.prediction.severity_normalized]}
-												</Badge>
-												<span class="tp {c.prediction.score_status === 'TP' ? '' : 'no'}">{c.prediction.score_status === 'TP' ? '✓ label' : c.prediction.score_status === 'FP' ? 'not in label' : ''}</span>
+												<span class="ind">
+													<Badge fill tone={severityTone(c.prediction.severity_normalized)}>
+														{SEVERITY_LABEL[c.prediction.severity_normalized]}
+													</Badge>
+												</span>
+												{@render labelTag(c.prediction.score_status)}
 											</li>
 										{/each}
 										{#if s.serious.length > 5}<li class="more">+{s.serious.length - 5} more</li>{/if}
@@ -487,7 +503,7 @@
 	}
 	.aes li {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto auto auto;
+		grid-template-columns: minmax(0, 1fr) 3.6em 6.4em 5.6em;
 		align-items: center;
 		gap: 10px;
 		padding-bottom: 6px;
@@ -496,6 +512,15 @@
 	.aes li:last-child {
 		border-bottom: 0;
 		padding-bottom: 0;
+	}
+	.aes.no-conf li {
+		grid-template-columns: minmax(0, 1fr) 3.6em 5.6em;
+	}
+	.freq {
+		text-align: right;
+	}
+	.ind {
+		display: flex;
 	}
 	.aes li.more {
 		display: block;
@@ -523,7 +548,7 @@
 		font-weight: 400;
 	}
 	.tp {
-		min-width: 4.5em;
+		text-align: right;
 		color: var(--green);
 		font-size: 0.75rem;
 		font-weight: 600;

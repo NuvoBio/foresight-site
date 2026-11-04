@@ -11,12 +11,8 @@
 
 <header class="topbar">
 	<div class="wrap bar">
-		<a class="brand" href={resolve('/')}>
-			<span class="logo"><Logo size={44} /></span>
-			<span>
-				<span class="name">Foresight</span>
-				<span class="tag">Predicted adverse events and the reasoning behind them</span>
-			</span>
+		<a class="brand" href={resolve('/')} aria-label="Foresight home">
+			<Logo height={50} />
 		</a>
 		<nav aria-label="Pages">
 			<a href={resolve('/')} aria-current={onSummary ? 'page' : undefined}>Summary</a>
@@ -57,21 +53,6 @@
 		color: inherit;
 		text-decoration: none;
 	}
-	.logo {
-		display: grid;
-		place-items: center;
-	}
-	.name {
-		display: block;
-		font-weight: 700;
-		font-size: 1.15rem;
-		letter-spacing: 0.02em;
-	}
-	.tag {
-		display: block;
-		color: var(--faint);
-		font-size: 0.8rem;
-	}
 	nav {
 		display: flex;
 		gap: 4px;
@@ -105,9 +86,6 @@
 	@media (max-width: 900px) {
 		.wrap {
 			padding-inline: 16px;
-		}
-		.tag {
-			display: none;
 		}
 		.right {
 			margin-left: 0;
