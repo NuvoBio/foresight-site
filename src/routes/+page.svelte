@@ -18,7 +18,7 @@
 		try {
 			const data = await loadSnapshot();
 			const q = new URLSearchParams(location.search).get('run');
-			run = q && data.runs.includes(q) ? q : data.runs[0];
+			run = q && data.runs.includes(q) ? q : data.runs[data.runs.length - 1];
 			snapshot = data;
 		} catch (e) {
 			error = `Could not load the dataset (${(e as Error).message}).`;

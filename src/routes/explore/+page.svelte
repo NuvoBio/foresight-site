@@ -20,7 +20,7 @@
 		try {
 			const data = await loadSnapshot();
 			const q = new URLSearchParams(location.search);
-			run = data.runs.includes(q.get('run') ?? '') ? q.get('run')! : data.runs[0];
+			run = data.runs.includes(q.get('run') ?? '') ? q.get('run')! : data.runs[data.runs.length - 1];
 			const inRun = peptidesIn(data, run);
 			peptide = inRun.includes(q.get('peptide') ?? '') ? q.get('peptide')! : inRun[0] ?? data.peptides[0];
 			selectedId = q.get('ae');
