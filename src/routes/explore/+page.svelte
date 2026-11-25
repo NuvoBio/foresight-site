@@ -8,6 +8,8 @@
 	import ProteinPanel from '#lib/components/ProteinPanel.svelte';
 	import AeCard from '#lib/components/AeCard.svelte';
 	import DetailPanel from '#lib/components/DetailPanel.svelte';
+	import KgRunView from '#lib/components/KgRunView.svelte';
+	import { KG_RUN_PREFIX, isKgRun, kgRunLabel, loadKgIndex, type KgIndexRun } from '../../lib/kgPredictions';
 
 	let snapshot = $state<Snapshot | null>(null);
 	let error = $state<string | null>(null);
@@ -15,22 +17,36 @@
 	let peptide = $state('');
 	let selectedId = $state<string | null>(null);
 	let sort = $state<SortMode>('strength');
+	// skein knowledge-graph prediction runs (empty when no skein folder is linked)
+	let kgRuns = $state<KgIndexRun[]>([]);
+	let ready = $state(false);
 
 	onMount(async () => {
-		try {
-			const data = await loadSnapshot();
-			const q = new URLSearchParams(location.search);
-			run = data.runs.includes(q.get('run') ?? '') ? q.get('run')! : data.runs[data.runs.length - 1];
-			const inRun = peptidesIn(data, run);
-			peptide = inRun.includes(q.get('peptide') ?? '') ? q.get('peptide')! : inRun[0] ?? data.peptides[0];
-			selectedId = q.get('ae');
-			const s = q.get('sort');
-			if (s === 'confidence' || s === 'frequency') sort = s;
-			snapshot = data;
-		} catch (e) {
-			error = `Could not load the dataset (${(e as Error).message}).`;
-		}
+		const [data, kg] = await Promise.all([
+			loadSnapshot().catch((e) => {
+				error = `Could not load the dataset (${(e as Error).message}).`;
+				return null;
+			}),
+			loadKgIndex()
+		]);
+		kgRuns = kg;
+		if (data) snapshot = data;
+		if (!data && kg.length) error = null; // KG runs alone are enough to show something
+		const q = new URLSearchParams(location.search);
+		const all = allRuns();
+		const latest = data ? data.runs[data.runs.length - 1] : all[all.length - 1];
+		run = all.includes(q.get('run') ?? '') ? q.get('run')! : (latest ?? run);
+		const inRun = peptidesFor(run);
+		peptide = inRun.includes(q.get('peptide') ?? '') ? q.get('peptide')! : (inRun[0] ?? data?.peptides[0] ?? '');
+		selectedId = q.get('ae');
+		const s = q.get('sort');
+		if (s === 'confidence' || s === 'frequency') sort = s;
+		ready = true;
 	});
+
+	function allRuns(): string[] {
+		return [...(snapshot?.runs ?? []), ...kgRuns.map((r) => KG_RUN_PREFIX + r.id)];
+	}
 
 	// A run need not cover every peptide (e.g. a single-peptide run like semaglutide_pharm4), so the
 	// peptide picker lists only the peptides that run has.
@@ -38,7 +54,14 @@
 		const have = new Set(data.entries.filter((e) => e.run === r).map((e) => e.peptide));
 		return data.peptides.filter((p) => have.has(p));
 	}
-	const runPeptides = $derived(snapshot ? peptidesIn(snapshot, run) : []);
+	function peptidesFor(r: string): string[] {
+		if (isKgRun(r)) return kgRunOf(r)?.peptides.map((p) => p.peptide) ?? [];
+		return snapshot ? peptidesIn(snapshot, r) : [];
+	}
+	const kgRunOf = (r: string) => kgRuns.find((k) => KG_RUN_PREFIX + k.id === r) ?? null;
+	const runPeptides = $derived(peptidesFor(run));
+	const kgRun = $derived(isKgRun(run) ? kgRunOf(run) : null);
+	const kgEntry = $derived(kgRun?.peptides.find((p) => p.peptide === peptide) ?? null);
 
 	const entry = $derived(snapshot?.entries.find((e) => e.run === run && e.peptide === peptide) ?? null);
 	const cards = $derived(entry ? buildCards(entry) : []);
@@ -56,7 +79,7 @@
 
 	// keep the view in the URL so a link reopens the same run, peptide, sort and card
 	$effect(() => {
-		if (!snapshot) return;
+		if (!ready) return;
 		const q = new URLSearchParams({ run, peptide });
 		if (sort !== 'strength') q.set('sort', sort);
 		if (selectedId) q.set('ae', selectedId);
@@ -64,7 +87,7 @@
 	});
 
 	function choose(r: string, p: string) {
-		const inRun = snapshot ? peptidesIn(snapshot, r) : [];
+		const inRun = peptidesFor(r);
 		run = r;
 		peptide = inRun.includes(p) ? p : inRun[0] ?? p;
 		selectedId = null;
@@ -85,12 +108,21 @@
 <svelte:head><title>Explorer · Foresight</title></svelte:head>
 
 <SiteHeader>
-	{#if snapshot}
+	{#if snapshot || kgRuns.length}
 		<div class="controls">
 			<label>
 				<span>Run</span>
 				<select value={run} onchange={(e) => choose(e.currentTarget.value, peptide)}>
-					{#each snapshot.runs as r (r)}<option value={r}>{runLabel(r)}</option>{/each}
+					{#if snapshot}
+						<optgroup label="Prediction snapshot">
+							{#each snapshot.runs as r (r)}<option value={r}>{runLabel(r)}</option>{/each}
+						</optgroup>
+					{/if}
+					{#if kgRuns.length}
+						<optgroup label="Knowledge graph (skein)">
+							{#each kgRuns as r (r.id)}<option value={KG_RUN_PREFIX + r.id}>{kgRunLabel(r)}</option>{/each}
+						</optgroup>
+					{/if}
 				</select>
 			</label>
 			<label>
@@ -104,7 +136,13 @@
 </SiteHeader>
 
 <main class="wrap">
-	{#if error}
+	{#if isKgRun(run)}
+		{#if kgRun && kgEntry}
+			<KgRunView run={kgRun.id} entry={kgEntry} />
+		{:else}
+			<p class="status">No knowledge-graph prediction for {peptide} in this run.</p>
+		{/if}
+	{:else if error}
 		<p class="status error">{error}</p>
 	{:else if !snapshot}
 		<p class="status">Loading predictions…</p>

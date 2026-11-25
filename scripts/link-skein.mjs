@@ -5,9 +5,10 @@
 // `npm run build` ships them as they are. Only those two folders are linked, never the
 // skein root (it holds .env and the source stores).
 // SKEIN_DIR defaults to ../skein next to this site. Runs before dev and build.
-import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildPredictionIndex } from './skein-index.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const skein = resolve(root, process.env.SKEIN_DIR ?? '../skein');
@@ -33,3 +34,8 @@ for (const [name, rel] of Object.entries(links)) {
 	symlinkSync(target, link, 'dir');
 	console.log(`[skein] static/skein/${name} -> ${target}`);
 }
+
+// prediction runs for the explorer (served live by vite.config.ts during dev)
+const index = buildPredictionIndex(resolve(skein, links.reports));
+writeFileSync(resolve(dest, 'predictions-index.json'), JSON.stringify(index, null, 1) + '\n');
+console.log(`[skein] predictions-index.json: ${index.runs.length} prediction run(s)`);
