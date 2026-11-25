@@ -6,7 +6,7 @@
 	import ThemeToggle from './ThemeToggle.svelte';
 
 	let { children }: { children?: Snippet } = $props();
-	const onSummary = $derived(page.route.id === '/');
+	const route = $derived(page.route.id);
 </script>
 
 <header class="topbar">
@@ -15,8 +15,9 @@
 			<Logo height={50} />
 		</a>
 		<nav aria-label="Pages">
-			<a href={resolve('/')} aria-current={onSummary ? 'page' : undefined}>Summary</a>
-			<a href={resolve('/explore')} aria-current={!onSummary ? 'page' : undefined}>Explorer</a>
+			<a href={resolve('/')} aria-current={route === '/' ? 'page' : undefined}>Summary</a>
+			<a href={resolve('/explore')} aria-current={route === '/explore' ? 'page' : undefined}>Explorer</a>
+			<a href={resolve('/kg')} aria-current={route === '/kg' ? 'page' : undefined}>Graph</a>
 		</nav>
 		<div class="right">
 			{@render children?.()}

@@ -22,3 +22,6 @@ Thumbs.db
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 foresight_site.tgz
+
+# skein outputs, linked by scripts/link-skein.mjs
+/static/skein

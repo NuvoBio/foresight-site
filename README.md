@@ -51,6 +51,21 @@ To preview with a synthetic run in the new format:
 `fixtures/build_demo_snapshot.sh path/to/parse_ae_dashboard.py` then
 `npm run sync-data -- fixtures/demo_snapshot.json`. Don't deploy the demo snapshot.
 
+## Knowledge graph (`/kg`)
+
+The Graph page reads skein's `data/processed/kg/kg.sqlite` as it is, in the browser (sql.js), so there is no export or parsing step. `npm run dev` and `npm run build` first run `scripts/link-skein.mjs`, which links
+
+- `static/skein/kg` -> `$SKEIN_DIR/data/processed/kg`
+- `static/skein/reports` -> `$SKEIN_DIR/reports`
+
+`SKEIN_DIR` defaults to `../skein` (next to this folder). Only those two folders are linked, never the skein root. After a pipeline rerun, refresh the page. On the VM:
+
+```sh
+SKEIN_DIR=~/skein npm run dev          # then on the Mac: ssh -L 5173:localhost:5173 azure
+```
+
+The page picks the same proteins and neighbours as `skein/plots/generate_kg_plot.py` (top N by rank, lower-ranked proteins with literature relations, literature neighbours first), and the URL keeps the peptide and settings. `static/skein/` is gitignored; a build without skein (e.g. the GitHub Pages workflow) shows a "could not load" note on `/kg` and the other pages are unaffected.
+
 ## Deploy to GitHub Pages
 
 1. Push this folder to a GitHub repository (branch `main`).
