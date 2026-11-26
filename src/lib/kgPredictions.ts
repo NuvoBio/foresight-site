@@ -39,6 +39,13 @@ export interface KgContextEdge {
 	doc_id?: string;
 	pmid?: number | string;
 	evidence?: string;
+	// copied from the edge by predict_aes.describe_edge, when it has them
+	action_type?: string;
+	max_phase?: string;
+	affinity?: string;
+	warning_type?: string;
+	percent?: string;
+	reports?: string;
 }
 export interface KgRecord {
 	ae: string;

@@ -1,7 +1,7 @@
 <script lang="ts">
 	// One KG-grounded prediction: the cited path as a mini graph on the left,
 	// the adverse event, its rating and the model's mechanism summary on the right.
-	import type { KgRecord } from '../kgPredictions';
+	import type { KgContextEdge, KgRecord } from '../kgPredictions';
 	import { severityKey } from '../kgPredictions';
 	import { SEVERITY_LABEL, pubmedUrl } from '../evidence';
 	import Badge from './Badge.svelte';
@@ -16,16 +16,41 @@
 
 	const sev = $derived(severityKey(record.severity));
 	const literature = $derived(record.context.edges.filter((e) => e.origin === 'literature'));
+	// A cited path is a walk, and an edge can point against it: a drug -agonist_of->
+	// protein edge is traversed protein -> drug. Follow the node reached so far, the
+	// same way the mini graph lays the path out, and mark the backwards hops.
 	const chains = $derived(
-		record.kg_paths.map((p) =>
-			p
-				.map((id) => record.context.edges.find((e) => e.edge_id === id))
-				.filter((e): e is NonNullable<typeof e> => !!e)
-		)
+		record.kg_paths.map((path) => {
+			const steps: {
+				edge: KgContextEdge;
+				fromName: string;
+				toName: string;
+				reversed: boolean;
+			}[] = [];
+			let at: string | null = null;
+			for (const id of path) {
+				const e: KgContextEdge | undefined = record.context.edges.find((x) => x.edge_id === id);
+				if (!e) continue;
+				const reversed: boolean = at !== null && at !== e.source;
+				steps.push({
+					edge: e,
+					fromName: reversed ? e.target_name : e.source_name,
+					toName: reversed ? e.source_name : e.target_name,
+					reversed
+				});
+				at = reversed ? e.source : e.target;
+			}
+			return steps;
+		})
 	);
 	const plaus = $derived((record.perturbation_plausibility ?? '').toLowerCase().match(/likely|uncertain|unlikely/)?.[0] ?? null);
 	const pmid = (v: unknown) => (v ? String(Math.round(Number(v))) : null);
 	const pred = (p: string | null, neg?: boolean) => (neg ? 'NOT ' : '') + String(p ?? '').replaceAll('_', ' ');
+	/** The figure a pharmacology edge carries, for the hop's tooltip. */
+	const figure = (e: KgContextEdge) =>
+		[e.percent && `${e.percent} of reports`, e.affinity, e.warning_type, e.max_phase && `phase ${e.max_phase}`]
+			.filter(Boolean)
+			.join(' · ');
 </script>
 
 <article class="card" class:unsupported={!record.kg_supported} aria-labelledby="kg-ae-{index}">
@@ -71,10 +96,15 @@
 				<h5>Cited path{chains.length > 1 ? 's' : ''}</h5>
 				{#each chains as chain, i (i)}
 					<p class="chain">
-						{#each chain as e, j (e.edge_id)}
-							{#if j === 0}<strong>{e.source_name}</strong>{/if}
-							<span class="hop" class:lit={e.origin === 'literature'} title="{e.edge_id} · {e.origin}">{pred(e.predicate, e.negated)}</span>
-							<strong>{e.target_name}</strong>
+						{#each chain as s, j (s.edge.edge_id)}
+							{#if j === 0}<strong>{s.fromName}</strong>{/if}
+							<span
+								class="hop"
+								class:lit={s.edge.origin === 'literature'}
+								class:rev={s.reversed}
+								title="{s.edge.edge_id} · {s.edge.origin}{figure(s.edge) ? ` · ${figure(s.edge)}` : ''}"
+							>{pred(s.edge.predicate, s.edge.negated)}</span>
+							<strong>{s.toName}</strong>
 						{/each}
 					</p>
 				{/each}
@@ -203,6 +233,13 @@
 	}
 	.hop::after {
 		content: ' →';
+	}
+	/* an edge traversed against its direction, e.g. protein <- agonist_of - drug */
+	.hop.rev::before {
+		content: '← ';
+	}
+	.hop.rev::after {
+		content: ' —';
 	}
 	.hop.lit {
 		color: #e08a1e;

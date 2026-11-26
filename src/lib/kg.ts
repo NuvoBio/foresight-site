@@ -192,13 +192,25 @@ export function nodeLabel(n: Row | undefined, id = ''): string {
 }
 
 /** The FAERS percent on an edge as a number, for ordering ("12.4%" -> 12.4). */
-function percent(e: KgEdge): number {
+function percent(e: EdgeLike): number {
 	const v = Number(String(e.percent ?? '').replace('%', ''));
 	return Number.isFinite(v) ? v : 0;
 }
 
+/** What edgeText needs: a graph edge, or a prediction record's copy of one. */
+export interface EdgeLike {
+	origin?: string | null;
+	predicate?: string | null;
+	rank?: unknown;
+	negated?: unknown;
+	percent?: unknown;
+	affinity?: unknown;
+	max_phase?: unknown;
+	warning_type?: unknown;
+}
+
 /** The figure a ChEMBL, BindingDB or FAERS edge carries (affinity, phase, warning, percent). */
-export function pharmText(e: KgEdge): string {
+export function pharmText(e: EdgeLike): string {
 	if (e.origin === 'faers') return String(e.percent ?? '');
 	if (e.warning_type) return String(e.warning_type);
 	if (e.affinity) return String(e.affinity);
@@ -208,17 +220,17 @@ export function pharmText(e: KgEdge): string {
 
 /** Literature edges show their predicate ("NOT x" when negated), shortlist edges their rank,
  * and a ChEMBL/BindingDB/FAERS edge the figure it carries. */
-export function edgeText(e: KgEdge): string {
+export function edgeText(e: EdgeLike): string {
 	if (e.origin === 'literature') {
 		const p = String(e.predicate ?? '').replaceAll('_', ' ');
 		return isNegated(e) ? `NOT ${p}` : p;
 	}
 	if (e.predicate === 'predicted_interaction' && e.rank) return `#${Math.round(Number(e.rank))}`;
-	if (PHARM_ORIGINS.has(e.origin)) return pharmText(e);
+	if (PHARM_ORIGINS.has(String(e.origin ?? ''))) return pharmText(e);
 	return '';
 }
 
-export const isNegated = (e: Row) => String(e.negated).toLowerCase() === 'true' || e.negated === 1;
+export const isNegated = (e: EdgeLike | Row) => String(e.negated).toLowerCase() === 'true' || e.negated === 1;
 
 export const TYPE_COLOURS: Record<string, string> = {
 	peptide: '#8a8f98',
