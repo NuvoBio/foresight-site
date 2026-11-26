@@ -20,10 +20,17 @@ const skeinIndex = (): Plugin => ({
 			res.setHeader('Cache-Control', 'no-store');
 			res.end(JSON.stringify(buildPredictionIndex(resolve(skeinDir, 'reports'))));
 		});
+
 	}
 });
 
 export default defineConfig({
+	server: {
+		allowedHosts:['foresight.nuvobio.com']
+	},
+	preview: {
+		allowedHosts:['foresight.nuvobio.com']
+	},
 	plugins: [
 		skeinIndex(),
 		sveltekit({
