@@ -23,6 +23,7 @@
 	let peptide = $state('');
 	let maxProteins = $state(10);
 	let maxNeighbours = $state(30);
+	let maxOutcomes = $state(4); // outcomes followed out of each drug or compound
 	let extras = $state(true);
 	let hidden = $state<string[]>([]); // edge origins switched off
 	let selected = $state<Selection>(null);
@@ -30,12 +31,14 @@
 
 	onMount(() => {
 		const q = new URLSearchParams(location.search);
-		const int = (k: string, d: number) => {
+		const int = (k: string, d: number, min = 1) => {
 			const v = Number(q.get(k));
-			return Number.isInteger(v) && v > 0 ? v : d;
+			// q.get returns null for a missing param, and Number(null) is 0, so ask first
+			return q.has(k) && Number.isInteger(v) && v >= min ? v : d;
 		};
 		maxProteins = int('proteins', 10);
 		maxNeighbours = int('neighbours', 30);
+		maxOutcomes = int('outcomes', 4, 0);
 		extras = q.get('extras') !== '0';
 		loadKg()
 			.then((g) => {
@@ -55,6 +58,7 @@
 			? peptideSubgraph(kg, peptide, {
 					maxProteins,
 					maxNeighbours,
+					maxOutcomes,
 					extras,
 					origins: new Set(origins.filter((o) => !hidden.includes(o)))
 				})
@@ -75,6 +79,7 @@
 		const q = new URLSearchParams({ peptide });
 		if (maxProteins !== 10) q.set('proteins', String(maxProteins));
 		if (maxNeighbours !== 30) q.set('neighbours', String(maxNeighbours));
+		if (maxOutcomes !== 4) q.set('outcomes', String(maxOutcomes));
 		if (!extras) q.set('extras', '0');
 		goto(`?${q}`, { replace: true, shallow: true });
 	});
@@ -161,6 +166,10 @@
 			<label class="num">
 				<span>Neighbours</span>
 				<input type="number" min="0" max="500" bind:value={maxNeighbours} />
+			</label>
+			<label class="num" title="Reported events and warnings followed out of each drug or compound">
+				<span>Per drug</span>
+				<input type="number" min="0" max="50" bind:value={maxOutcomes} />
 			</label>
 			<label class="check">
 				<input type="checkbox" bind:checked={extras} />

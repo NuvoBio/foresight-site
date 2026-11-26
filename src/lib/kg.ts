@@ -77,6 +77,8 @@ export function loadKg(): Promise<Kg> {
 export interface SubgraphOptions {
 	maxProteins: number;
 	maxNeighbours: number;
+	/** outcomes to follow out from each plotted drug or compound (default 4) */
+	maxOutcomes?: number;
 	/** also show lower-ranked proteins that have literature relations */
 	extras: boolean;
 	/** edge origins to include (shortlist edges are always kept) */
@@ -90,13 +92,21 @@ export interface Subgraph {
 	rank: Map<string, number>;
 	/** lower-ranked proteins shown for their literature */
 	extra: Set<string>;
+	/** nodes reached by the extra hop out of a drug or compound */
+	outcome: Set<string>;
 }
 
 const PROTEIN_TYPES = new Set(['peptide', 'protein', 'gene']);
+/** Nodes that act on a protein, and the outcomes they can carry. */
+const AGENT_TYPES = new Set(['drug', 'compound']);
+const OUTCOME_TYPES = new Set(['adverse_event', 'phenotype', 'disease']);
+const PHARM_ORIGINS = new Set(['chembl', 'bindingdb', 'faers']);
 
 const num = (v: unknown) => (v === null || v === undefined || v === '' ? NaN : Number(v));
 
-/** Same selection as skein/plots/generate_kg_plot.py: peptide -> top proteins -> neighbours, literature first. */
+/** Same selection as skein/plots/generate_kg_plot.py: peptide -> top proteins -> neighbours
+ * (literature first) -> the outcomes hanging off each plotted drug or compound. That last hop
+ * matters: a FAERS reaction and a ChEMBL warning hang off the drug, not the protein. */
 export function peptideSubgraph(kg: Kg, peptide: string, opt: SubgraphOptions): Subgraph {
 	const pep = peptide.startsWith('peptide:') ? peptide : `peptide:${peptide}`;
 	const keep = (e: KgEdge) => e.origin === 'shortlist' || opt.origins.has(e.origin);
@@ -151,10 +161,28 @@ export function peptideSubgraph(kg: Kg, peptide: string, opt: SubgraphOptions): 
 		)
 		.slice(0, opt.maxNeighbours);
 
-	const ids = new Set([pep, ...proteins, ...neighbours]);
+	const type = (n: string) => String(kg.nodes.get(n)?.type ?? '');
+	const outcome = new Set<string>();
+	const taken = new Set([pep, ...proteins, ...neighbours]);
+	for (const agent of neighbours.filter((n) => AGENT_TYPES.has(type(n)))) {
+		const rows = (incident.get(agent) ?? [])
+			.filter((e) => OUTCOME_TYPES.has(type(other(e, agent))))
+			.sort((a, b) => percent(b) - percent(a) || other(a, agent).localeCompare(other(b, agent)));
+		let kept = 0;
+		for (const e of rows) {
+			if (kept >= (opt.maxOutcomes ?? 4)) break;
+			const n = other(e, agent);
+			kept += 1;
+			if (taken.has(n)) continue;
+			taken.add(n);
+			outcome.add(n);
+		}
+	}
+
+	const ids = new Set([pep, ...proteins, ...neighbours, ...outcome]);
 	const nodes = [...ids].map((id) => kg.nodes.get(id) ?? ({ node_id: id, type: '', name: id } as KgNode));
 	const edges = kg.edges.filter((e) => keep(e) && ids.has(e.source_node) && ids.has(e.target_node));
-	return { nodes, edges, rank, extra: new Set(extras) };
+	return { nodes, edges, rank, extra: new Set(extras), outcome };
 }
 
 /** Display name: gene symbol, then name, then the id without its prefix. */
@@ -163,13 +191,30 @@ export function nodeLabel(n: Row | undefined, id = ''): string {
 	return text.length > 24 ? `${text.slice(0, 23)}…` : text;
 }
 
-/** Literature edges show their predicate ("NOT x" when negated), shortlist edges their rank. */
+/** The FAERS percent on an edge as a number, for ordering ("12.4%" -> 12.4). */
+function percent(e: KgEdge): number {
+	const v = Number(String(e.percent ?? '').replace('%', ''));
+	return Number.isFinite(v) ? v : 0;
+}
+
+/** The figure a ChEMBL, BindingDB or FAERS edge carries (affinity, phase, warning, percent). */
+export function pharmText(e: KgEdge): string {
+	if (e.origin === 'faers') return String(e.percent ?? '');
+	if (e.warning_type) return String(e.warning_type);
+	if (e.affinity) return String(e.affinity);
+	if (e.max_phase) return `phase ${e.max_phase}`;
+	return '';
+}
+
+/** Literature edges show their predicate ("NOT x" when negated), shortlist edges their rank,
+ * and a ChEMBL/BindingDB/FAERS edge the figure it carries. */
 export function edgeText(e: KgEdge): string {
 	if (e.origin === 'literature') {
 		const p = String(e.predicate ?? '').replaceAll('_', ' ');
 		return isNegated(e) ? `NOT ${p}` : p;
 	}
 	if (e.predicate === 'predicted_interaction' && e.rank) return `#${Math.round(Number(e.rank))}`;
+	if (PHARM_ORIGINS.has(e.origin)) return pharmText(e);
 	return '';
 }
 
@@ -184,7 +229,8 @@ export const TYPE_COLOURS: Record<string, string> = {
 	disease: '#c8432f',
 	adverse_event: '#e08a1e',
 	phenotype: '#9b59b6',
-	drug: '#7f6a4f'
+	drug: '#7f6a4f',
+	compound: '#a08b6a'
 };
 export const OTHER_COLOUR = '#9aa0a6';
 export const EXTRA_PROTEIN_COLOUR = '#9cc3ee';
